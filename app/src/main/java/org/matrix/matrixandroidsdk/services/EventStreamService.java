@@ -1,21 +1,15 @@
 package org.matrix.matrixandroidsdk.services;
 
-import android.app.Activity;
-import android.app.AlertDialog;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
-import android.content.DialogInterface;
 import android.content.Intent;
-import android.media.RingtoneManager;
-import android.net.Uri;
 import android.os.IBinder;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.TaskStackBuilder;
 import android.util.Log;
-import android.widget.Toast;
 
 import org.matrix.androidsdk.MXSession;
 import org.matrix.androidsdk.data.Room;
@@ -24,23 +18,19 @@ import org.matrix.androidsdk.listeners.MXEventListener;
 import org.matrix.androidsdk.rest.model.Event;
 import org.matrix.androidsdk.rest.model.RoomMember;
 import org.matrix.androidsdk.rest.model.bingrules.BingRule;
-import org.matrix.matrixandroidsdk.ConsoleApplication;
-import org.matrix.matrixandroidsdk.ViewedRoomTracker;
-import org.matrix.matrixandroidsdk.activity.CommonActivityUtils;
-import org.matrix.matrixandroidsdk.activity.HomeActivity;
 import org.matrix.matrixandroidsdk.Matrix;
 import org.matrix.matrixandroidsdk.R;
+import org.matrix.matrixandroidsdk.ViewedRoomTracker;
+import org.matrix.matrixandroidsdk.activity.HomeActivity;
 import org.matrix.matrixandroidsdk.activity.LockScreenActivity;
-import org.matrix.matrixandroidsdk.activity.PublicRoomsActivity;
 import org.matrix.matrixandroidsdk.activity.RoomActivity;
-import org.matrix.matrixandroidsdk.util.EventUtils;
-
-import java.util.ArrayList;
 
 /**
  * A foreground service in charge of controlling whether the event stream is running or not.
  */
 public class EventStreamService extends Service {
+    private static final String CAR_VOICE_REPLY_KEY = "org.matrix.matrixandroidsdk.CAR_VOICE_REPLY_KEY";
+
     public static enum StreamAction {
         UNKNOWN,
         STOP,
@@ -284,6 +274,48 @@ public class EventStreamService extends Service {
             builder.addAction(R.drawable.ic_menu_start_conversation, getString(R.string.action_open), stackBuildertap.getPendingIntent(0, PendingIntent.FLAG_UPDATE_CURRENT));
         }
 
+        // send message to car if connected
+        {
+            int carConversationId = roomId.hashCode();
+            Intent msgHeardIntent = new Intent()
+                    .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+                    .setAction("org.matrix.matrixandroidsdk.ACTION_MESSAGE_HEARD")
+                    .putExtra("conversation_id", carConversationId);
+
+            PendingIntent msgHeardPendingIntent =
+                    PendingIntent.getBroadcast(getApplicationContext(),
+                            carConversationId,
+                            msgHeardIntent,
+                            PendingIntent.FLAG_UPDATE_CURRENT);
+
+            Intent msgReplyIntent = new Intent()
+                    .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+                    .setAction("org.matrix.matrixandroidsdk.ACTION_MESSAGE_REPLY")
+                    .putExtra("conversation_id", carConversationId);
+
+            PendingIntent msgReplyPendingIntent = PendingIntent.getBroadcast(
+                    getApplicationContext(),
+                    carConversationId,
+                    msgReplyIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT);
+
+            // Build a RemoteInput for receiving voice input in a Car Notification
+            android.support.v4.app.RemoteInput remoteInput = new android.support.v4.app.RemoteInput.Builder(CAR_VOICE_REPLY_KEY)
+                    .setLabel(getApplicationContext().getString(R.string.action_quick_reply))
+                    .build();
+
+            // Create an unread conversation object to organize a group of messages
+            // from a particular sender.
+            NotificationCompat.CarExtender.UnreadConversation.Builder unreadConvBuilder =
+                    new NotificationCompat.CarExtender.UnreadConversation.Builder(roomId)
+                            .setReadPendingIntent(msgHeardPendingIntent)
+                            .setReplyAction(msgReplyPendingIntent, remoteInput);
+
+            unreadConvBuilder.addMessage(body)
+                    .setLatestTimestamp(System.currentTimeMillis());
+            builder.extend(new NotificationCompat.CarExtender()
+                    .setUnreadConversation(unreadConvBuilder.build()));
+        }
         Notification n = builder.build();
         n.flags |= Notification.FLAG_SHOW_LIGHTS;
         n.defaults |= Notification.DEFAULT_LIGHTS;
